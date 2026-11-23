@@ -1,0 +1,504 @@
+{
+  "dimension": 1530,
+  "blocks": {
+    "burden": [
+      0,
+      16
+    ],
+    "unigram": [
+      16,
+      54
+    ],
+    "bigram": [
+      54,
+      1498
+    ],
+    "context": [
+      1498,
+      1530
+    ]
+  },
+  "weights": {
+    "burden": 0.45,
+    "spectrum": 0.25,
+    "context": 0.3
+  },
+  "global_scale": "sqrt(dimension)",
+  "burden": [
+    {
+      "index": 0,
+      "name": "target_length",
+      "definition": "len(target.replace(\" \", \"\").lower()) / (same + 16)"
+    },
+    {
+      "index": 1,
+      "name": "target_word_count",
+      "definition": "Number of non-whitespace runs in raw target / (same + 4)"
+    },
+    {
+      "index": 2,
+      "name": "max_target_word_length",
+      "definition": "Maximum raw target non-whitespace run length / (same + 10); zero if absent"
+    },
+    {
+      "index": 3,
+      "name": "digit_fraction",
+      "definition": "ASCII digits in normalized target / max(1, normalized target length)"
+    },
+    {
+      "index": 4,
+      "name": "punctuation_fraction",
+      "definition": "string.punctuation characters in normalized target / max(1, normalized target length)"
+    },
+    {
+      "index": 5,
+      "name": "nonascii_fraction",
+      "definition": "Characters with ord > 127 in normalized target / max(1, normalized target length)"
+    },
+    {
+      "index": 6,
+      "name": "uppercase_fraction",
+      "definition": "Unicode uppercase characters in raw target / max(1, Unicode alphabetic characters in raw target)"
+    },
+    {
+      "index": 7,
+      "name": "space_fraction",
+      "definition": "U+0020 spaces in raw target / max(1, raw target length)"
+    },
+    {
+      "index": 8,
+      "name": "distinct_character_fraction",
+      "definition": "Distinct exact normalized target characters / max(1, normalized target length)"
+    },
+    {
+      "index": 9,
+      "name": "adjacent_repeat_fraction",
+      "definition": "Equal adjacent exact normalized target characters / max(1, normalized target length - 1)"
+    },
+    {
+      "index": 10,
+      "name": "prompt_length",
+      "definition": "Raw prompt character count / (same + 240)"
+    },
+    {
+      "index": 11,
+      "name": "context_word_count",
+      "definition": "ASCII [a-z0-9]+ tokens outside all quoted spans / (same + 40)"
+    },
+    {
+      "index": 12,
+      "name": "additional_quoted_spans",
+      "definition": "max(0, floor(number of ASCII quotes / 2) - 1) / (same + 2)"
+    },
+    {
+      "index": 13,
+      "name": "missing_quote",
+      "definition": "1 iff no ASCII double quote exists; finite fallback only, does not make prompt scorer-valid"
+    },
+    {
+      "index": 14,
+      "name": "empty_target",
+      "definition": "1 iff an ASCII quote exists and its first target segment normalizes to empty; scorer-invalid"
+    },
+    {
+      "index": 15,
+      "name": "unpaired_quote",
+      "definition": "1 iff number of ASCII quotes is odd; first post-quote segment still matches scorer extraction"
+    }
+  ],
+  "alphabet": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "ASCII_PUNCTUATION",
+    "OTHER"
+  ],
+  "character_mapping": "a-z -> 0..25; 0-9 -> 26..35; string.punctuation -> 36; everything else -> 37; no Unicode normalization; lowercase may expand codepoints.",
+  "bigram_index": "54 + 38 * class(left) + class(right); adjacent normalized characters only, no boundaries.",
+  "context_tokenization": "Remove every odd segment of prompt.split(ASCII double quote), including an unclosed quoted segment; join remaining segments with spaces, lowercase, tokenize with [a-z0-9]+. Match complete consecutive token sequences, not substrings. Any matching phrase activates its group once; overlaps across groups allowed; no stemming, negation or image inference.",
+  "context": [
+    {
+      "index": 1498,
+      "name": "signage",
+      "phrases": [
+        "sign",
+        "signpost",
+        "billboard",
+        "poster",
+        "banner"
+      ]
+    },
+    {
+      "index": 1499,
+      "name": "paper",
+      "phrases": [
+        "paper",
+        "book",
+        "notebook",
+        "page",
+        "newspaper"
+      ]
+    },
+    {
+      "index": 1500,
+      "name": "screen",
+      "phrases": [
+        "screen",
+        "display",
+        "monitor",
+        "digital",
+        "led"
+      ]
+    },
+    {
+      "index": 1501,
+      "name": "package",
+      "phrases": [
+        "label",
+        "bottle",
+        "jar",
+        "can",
+        "box",
+        "package"
+      ]
+    },
+    {
+      "index": 1502,
+      "name": "fabric",
+      "phrases": [
+        "shirt",
+        "t shirt",
+        "jersey",
+        "onesie",
+        "cloth",
+        "fabric"
+      ]
+    },
+    {
+      "index": 1503,
+      "name": "incised",
+      "phrases": [
+        "engraved",
+        "etched",
+        "carved",
+        "embossed",
+        "inscribed"
+      ]
+    },
+    {
+      "index": 1504,
+      "name": "stitched",
+      "phrases": [
+        "embroidered",
+        "embroidery",
+        "stitched",
+        "sewn"
+      ]
+    },
+    {
+      "index": 1505,
+      "name": "handwriting",
+      "phrases": [
+        "handwritten",
+        "handwriting",
+        "cursive",
+        "calligraphy"
+      ]
+    },
+    {
+      "index": 1506,
+      "name": "luminous",
+      "phrases": [
+        "neon",
+        "glowing",
+        "luminous",
+        "illuminated"
+      ]
+    },
+    {
+      "index": 1507,
+      "name": "paint",
+      "phrases": [
+        "painted",
+        "graffiti",
+        "mural",
+        "brush"
+      ]
+    },
+    {
+      "index": 1508,
+      "name": "printed",
+      "phrases": [
+        "printed",
+        "print",
+        "typography",
+        "typeset"
+      ]
+    },
+    {
+      "index": 1509,
+      "name": "small",
+      "phrases": [
+        "small",
+        "tiny",
+        "miniature",
+        "fine print"
+      ]
+    },
+    {
+      "index": 1510,
+      "name": "large",
+      "phrases": [
+        "large",
+        "giant",
+        "oversized",
+        "huge"
+      ]
+    },
+    {
+      "index": 1511,
+      "name": "heavy_font",
+      "phrases": [
+        "bold",
+        "thick",
+        "block letters"
+      ]
+    },
+    {
+      "index": 1512,
+      "name": "decorative",
+      "phrases": [
+        "ornate",
+        "decorative",
+        "elaborate",
+        "intricate",
+        "stylized"
+      ]
+    },
+    {
+      "index": 1513,
+      "name": "degraded",
+      "phrases": [
+        "faded",
+        "weathered",
+        "worn",
+        "rusty",
+        "cracked",
+        "tattered"
+      ]
+    },
+    {
+      "index": 1514,
+      "name": "blur",
+      "phrases": [
+        "blurred",
+        "blurry",
+        "blurring",
+        "motion blur",
+        "out of focus"
+      ]
+    },
+    {
+      "index": 1515,
+      "name": "occlusion",
+      "phrases": [
+        "partially covered",
+        "hidden",
+        "obscured",
+        "covered",
+        "overlapping"
+      ]
+    },
+    {
+      "index": 1516,
+      "name": "orientation",
+      "phrases": [
+        "angled",
+        "tilted",
+        "perspective",
+        "slanted",
+        "diagonal"
+      ]
+    },
+    {
+      "index": 1517,
+      "name": "curved_support",
+      "phrases": [
+        "curved",
+        "round",
+        "cylindrical",
+        "bottle",
+        "mug",
+        "cup"
+      ]
+    },
+    {
+      "index": 1518,
+      "name": "reflective_support",
+      "phrases": [
+        "metallic",
+        "glass",
+        "mirror",
+        "reflective",
+        "glossy"
+      ]
+    },
+    {
+      "index": 1519,
+      "name": "dark",
+      "phrases": [
+        "dim",
+        "dark",
+        "night",
+        "shadow",
+        "shadows"
+      ]
+    },
+    {
+      "index": 1520,
+      "name": "bright",
+      "phrases": [
+        "bright",
+        "sunlit",
+        "daylight",
+        "sunlight",
+        "well lit"
+      ]
+    },
+    {
+      "index": 1521,
+      "name": "complex_scene",
+      "phrases": [
+        "crowded",
+        "busy",
+        "cluttered",
+        "bustling",
+        "surrounded"
+      ]
+    },
+    {
+      "index": 1522,
+      "name": "simple_scene",
+      "phrases": [
+        "minimalist",
+        "simple",
+        "plain",
+        "neutral",
+        "clean"
+      ]
+    },
+    {
+      "index": 1523,
+      "name": "prominence",
+      "phrases": [
+        "prominently",
+        "prominent",
+        "clearly",
+        "clear",
+        "legible",
+        "readable"
+      ]
+    },
+    {
+      "index": 1524,
+      "name": "close_view",
+      "phrases": [
+        "close up",
+        "macro",
+        "detail shot"
+      ]
+    },
+    {
+      "index": 1525,
+      "name": "distant_view",
+      "phrases": [
+        "distant",
+        "far away",
+        "panoramic",
+        "wide shot"
+      ]
+    },
+    {
+      "index": 1526,
+      "name": "photographic",
+      "phrases": [
+        "realistic",
+        "photograph",
+        "photographic",
+        "photorealistic"
+      ]
+    },
+    {
+      "index": 1527,
+      "name": "illustrative",
+      "phrases": [
+        "illustration",
+        "illustrated",
+        "cartoon",
+        "comic",
+        "diagram",
+        "pixelated"
+      ]
+    },
+    {
+      "index": 1528,
+      "name": "textual_context",
+      "phrases": [
+        "text",
+        "equations",
+        "scribbles",
+        "notes",
+        "numbers"
+      ]
+    },
+    {
+      "index": 1529,
+      "name": "unusual_medium",
+      "phrases": [
+        "water",
+        "sand",
+        "snow",
+        "sky",
+        "fireworks",
+        "clouds",
+        "icing",
+        "frosting"
+      ]
+    }
+  ],
+  "normalization": "burden / sqrt(16); each spectrum separately divided by its L2 norm if nonzero, each multiplied by sqrt(0.25/2); binary context divided by its L2 norm if nonzero; burden multiplied sqrt(0.45), context sqrt(0.30); all coordinates multiplied sqrt(1530). Empty spectrum and cue blocks remain zero. No batch or training statistics.",
+  "provenance": "Scorer parsing and normalization from inputs/evidence/ocr.py. Counts are mathematical definitions. Cue groups, count saturation constants, alphabet buckets, block weights and kernel choice are explicitly unverified modeling assumptions informed by prompt instructions, not published OCR error probabilities or measured effects."
+}

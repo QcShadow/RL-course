@@ -1,0 +1,5 @@
+# Keep the existing working CUDA torch install when it satisfies this range.
+numpy>=1.26,<3
+torch>=2.4,<3
+gpytorch==1.15.2
+botorch==0.18.1

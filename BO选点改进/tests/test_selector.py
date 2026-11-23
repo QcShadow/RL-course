@@ -1,0 +1,137 @@
+from pathlib import Path
+import random
+import tempfile
+import unittest
+from unittest.mock import patch
+import numpy as np
+import torch
+from botorch.acquisition.analytic import LogExpectedImprovement
+from pcpo_bo import PromptBOSelector, SelectedPromptBatchSampler
+from pcpo_bo.acquisition import score_candidates
+from pcpo_bo.gp import bo_cpu_context, fit_model
+
+
+def rows(n=32):
+    return [{'prompt': f'A sign with "test {i}" in bold letters'} for i in range(n)]
+
+
+class SelectorTests(unittest.TestCase):
+    def test_shuffled_indices_keep_each_reward_group(self):
+        selector = PromptBOSelector(rows())
+        selected = selector.next_batch()
+        ids = np.repeat(selected, 8)
+        values = np.repeat(np.arange(8) / 8, 8)
+        permutation = np.random.default_rng(1).permutation(64)
+        result = selector.observe_flat(ids[permutation], values[permutation])
+        np.testing.assert_allclose(result['prompt_mean_rewards'], np.arange(8) / 8)
+        self.assertAlmostEqual(result['round_mean_reward'], 0.4375)
+        self.assertIsNone(selector.pending)
+
+    def test_reject_wrong_group_count_and_round_scalar(self):
+        selector = PromptBOSelector(rows())
+        chosen = selector.next_batch()
+        with self.assertRaises(ValueError):
+            selector.observe_round(chosen, 0.6)
+        ids = np.repeat(chosen, 8)
+        ids[0] = chosen[1]
+        with self.assertRaises(ValueError):
+            selector.observe_flat(ids, np.ones(64))
+        self.assertEqual(selector.completed_rounds, 0)
+        np.testing.assert_array_equal(chosen, selector.next_batch())
+
+    def test_resume_pending_and_warmup_sequence(self):
+        selector = PromptBOSelector(rows())
+        selected = selector.next_batch()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'state.json'
+            selector.save_state(path)
+            restored = PromptBOSelector.load_state(path, rows())
+            np.testing.assert_array_equal(restored.next_batch(), selected)
+            for instance in [selector, restored]:
+                instance.observe_round(selected, np.full((8, 8), .5))
+            np.testing.assert_array_equal(restored.next_batch(), selector.next_batch())
+            with self.assertRaises(ValueError):
+                PromptBOSelector.load_state(path, rows()[::-1])
+
+    def test_repeats_across_rounds_and_no_duplicate_text_within_round(self):
+        selector = PromptBOSelector(rows(8) + rows(1), acquisition='random')
+        for epoch in range(3):
+            ids = selector.next_batch()
+            self.assertEqual(len({selector.candidate_rows[i]['prompt'] for i in ids}), 8)
+            selector.observe_round(ids, np.zeros((8, 8)))
+        self.assertEqual(selector.completed_rounds, 3)
+
+    def test_random_sampler_matches_original(self):
+        selector = PromptBOSelector(rows(32))
+        selected = selector.next_batch()
+        sampler = SelectedPromptBatchSampler(32, 1)
+        sampler.set_indices(selected)
+        g = torch.Generator().manual_seed(42)
+        expected_ids = torch.randperm(32, generator=g)[:8].tolist()
+        repeated = [i for i in expected_ids for _ in range(8)]
+        expected = [repeated[i] for i in torch.randperm(64, generator=g).tolist()]
+        self.assertEqual([i for batch in sampler for i in batch], expected)
+        self.assertEqual(len(sampler), 64)
+
+    def test_fit_preserves_rl_random_streams_and_chunked_scores(self):
+        selector = PromptBOSelector(rows())
+        x = selector.features[:8]
+        y = torch.linspace(.1, .8, 8, dtype=torch.double).reshape(-1, 1)
+        torch_before = torch.get_rng_state().clone()
+        np_before, py_before = np.random.get_state(), random.getstate()
+        threads = torch.get_num_threads()
+        with bo_cpu_context(7):
+            model = fit_model(x, y)
+            candidates = selector.features[:16]
+            ucb = score_candidates(model, candidates, method='ucb', beta=2., chunk_size=5)
+            with torch.no_grad():
+                post = model.posterior(candidates.unsqueeze(-2))
+                expected = (post.mean + 2 * post.variance.sqrt()).reshape(-1)
+                logei_expected = LogExpectedImprovement(model, best_f=.8)(candidates.unsqueeze(-2))
+            torch.testing.assert_close(ucb, expected)
+            logei = score_candidates(model, candidates, method='logei', best_f=.8, chunk_size=5)
+            # Log-EI amplifies tiny posterior-variance differences in the far tail.
+            torch.testing.assert_close(logei, logei_expected, rtol=1e-6, atol=1e-5)
+        self.assertTrue(torch.equal(torch.get_rng_state(), torch_before))
+        np.testing.assert_array_equal(np.random.get_state()[1], np_before[1])
+        self.assertEqual(random.getstate(), py_before)
+        self.assertEqual(torch.get_num_threads(), threads)
+
+    def test_window_and_warmup_depend_on_rounds(self):
+        selector = PromptBOSelector(rows(), warmup_rounds=1, window_rounds=1)
+        chosen = selector.next_batch()
+        selector.observe_round(chosen, np.full((8, 8), .2))
+        scores = torch.arange(32, dtype=torch.double)
+        with patch('pcpo_bo.selector.fit_model', return_value=object()) as fit:
+            with patch('pcpo_bo.selector.score_candidates', return_value=scores):
+                selected = selector.next_batch()
+                np.testing.assert_array_equal(selected, np.arange(31, 23, -1))
+                selector.observe_round(selected, np.full((8, 8), .8))
+                selector.next_batch()
+        self.assertEqual(fit.call_count, 2)
+        x, y = fit.call_args.args
+        self.assertEqual(len(x), 8)
+        torch.testing.assert_close(y, torch.full((8, 1), .8, dtype=torch.double))
+        self.assertEqual(len(selector.history), 2)
+
+    def test_dataloader_round_and_checkpoint_pairing(self):
+        from torch.utils.data import DataLoader
+        from pcpo_bo.pcpo_adapter import load_for_epoch
+        selector = PromptBOSelector(rows())
+        sampler = SelectedPromptBatchSampler(32, 4)
+        sampler.set_indices(selector.next_batch())
+        loader = DataLoader(list(range(32)), batch_sampler=sampler)
+        indices = torch.cat(list(loader)).numpy()
+        summary = selector.observe_flat(indices, indices / 32.)
+        np.testing.assert_allclose(summary['prompt_mean_rewards'],
+                                   np.array(summary['prompt_indices']) / 32.)
+        with tempfile.TemporaryDirectory() as tmp:
+            selector.save_state(Path(tmp)/'epoch-000001.json')
+            restored = load_for_epoch(rows(), tmp, 1, **selector.config)
+            self.assertEqual(restored.history, selector.history)
+            with self.assertRaises(FileNotFoundError):
+                load_for_epoch(rows(), tmp, 2, **selector.config)
+
+
+if __name__ == '__main__':
+    unittest.main()
