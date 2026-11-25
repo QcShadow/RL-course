@@ -10,7 +10,7 @@ from .acquisition import score_candidates
 from .features import encode_rows
 from .gp import bo_cpu_context, fit_model
 
-STATE_VERSION = "pcpo-prompt-bo-v1"
+STATE_VERSION = "pcpo-prompt-bo-v3-min-reward-no-repeat"
 
 
 class PromptBOSelector:
@@ -50,15 +50,18 @@ class PromptBOSelector:
             recent = self.history[-cfg['window_rounds']:]
             indices = [i for record in recent for i in record['prompt_indices']]
             values = [y for record in recent for y in record['prompt_mean_rewards']]
-            train_y = torch.tensor(values, dtype=torch.double).reshape(-1, 1)
+            # BO minimizes raw OCR reward; acquisition functions maximize its negative.
+            train_y = -torch.tensor(values, dtype=torch.double).reshape(-1, 1)
             with bo_cpu_context(seed):
                 model = fit_model(self.features[indices], train_y)
                 scores = score_candidates(model, self.features, method=cfg['acquisition'],
-                                          beta=cfg['beta'], best_f=max(values))
+                                          beta=cfg['beta'], best_f=-min(values))
             order = torch.argsort(scores, descending=True, stable=True).tolist()
             mode = cfg['acquisition']
-        # Distinct rows containing identical text must not make a 16-image reward group.
-        selected, texts = [], set()
+        # Use all history, not the GP window, so old prompts stay excluded after resume.
+        texts = {self.candidate_rows[i]['prompt'] for record in self.history
+                 for i in record['prompt_indices']}
+        selected = []
         for index in order:
             prompt = self.candidate_rows[index]['prompt']
             if prompt in texts:
@@ -67,8 +70,11 @@ class PromptBOSelector:
             texts.add(prompt)
             if len(selected) == cfg['batch_size']:
                 break
+        if len(selected) != cfg['batch_size']:
+            raise ValueError("Not enough untrained distinct prompts for a full batch")
         self.pending = {
             'epoch': self.completed_rounds, 'selection_method': mode,
+            'selection_objective': 'minimize_prompt_mean_ocr_reward',
             'prompt_indices': selected,
             'acquisition_scores': None if scores is None else scores[selected].tolist(),
         }
@@ -128,7 +134,7 @@ class PromptBOSelector:
     def load_state(cls, path, candidate_rows):
         state = json.loads(Path(path).read_text())
         if state['version'] != STATE_VERSION:
-            raise ValueError("Unsupported BO state version")
+            raise ValueError("BO state version differs: start a new run for the minimize-reward, no-repeat policy")
         selector = cls(candidate_rows, **state['config'])
         if selector.pool_sha256 != state['pool_sha256']:
             raise ValueError("Prompt text or pool order differs from saved state")

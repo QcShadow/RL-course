@@ -53,13 +53,38 @@ class SelectorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 PromptBOSelector.load_state(path, rows()[::-1])
 
-    def test_repeats_across_rounds_and_no_duplicate_text_within_round(self):
-        selector = PromptBOSelector(rows(8) + rows(1), acquisition='random')
-        for epoch in range(3):
-            ids = selector.next_batch()
-            self.assertEqual(len({selector.candidate_rows[i]['prompt'] for i in ids}), 8)
-            selector.observe_round(ids, np.zeros((8, 8)))
-        self.assertEqual(selector.completed_rounds, 3)
+    def test_no_repeat_across_rounds_window_and_resume(self):
+        pool = rows(32) + rows(8)
+        for method in ['random', 'ucb', 'logei']:
+            selector = PromptBOSelector(pool, acquisition=method,
+                                        warmup_rounds=1, window_rounds=1)
+            seen = set()
+            with patch('pcpo_bo.selector.fit_model', return_value=object()):
+                with patch('pcpo_bo.selector.score_candidates',
+                           return_value=torch.arange(len(pool), dtype=torch.double)):
+                    for epoch in range(4):
+                        ids = selector.next_batch()
+                        texts = {pool[i]['prompt'] for i in ids}
+                        self.assertEqual(len(texts), 8)
+                        self.assertTrue(seen.isdisjoint(texts))
+                        seen.update(texts)
+                        selector.observe_round(ids, np.zeros((8, 8)))
+                        with tempfile.TemporaryDirectory() as tmp:
+                            path = Path(tmp) / 'state.json'
+                            selector.save_state(path)
+                            selector = PromptBOSelector.load_state(path, pool)
+                    with self.assertRaisesRegex(ValueError, 'Not enough untrained'):
+                        selector.next_batch()
+            self.assertEqual(len(seen), 32)
+            self.assertIsNone(selector.pending)
+
+    def test_partial_remaining_pool_is_not_reused(self):
+        selector = PromptBOSelector(rows(10), acquisition='random')
+        ids = selector.next_batch()
+        selector.observe_round(ids, np.zeros((8, 8)))
+        with self.assertRaisesRegex(ValueError, 'Not enough untrained'):
+            selector.next_batch()
+        self.assertIsNone(selector.pending)
 
     def test_random_sampler_matches_original(self):
         selector = PromptBOSelector(rows(32))
@@ -105,14 +130,54 @@ class SelectorTests(unittest.TestCase):
         with patch('pcpo_bo.selector.fit_model', return_value=object()) as fit:
             with patch('pcpo_bo.selector.score_candidates', return_value=scores):
                 selected = selector.next_batch()
-                np.testing.assert_array_equal(selected, np.arange(31, 23, -1))
+                expected = [i for i in range(31, -1, -1) if i not in chosen][:8]
+                np.testing.assert_array_equal(selected, expected)
                 selector.observe_round(selected, np.full((8, 8), .8))
                 selector.next_batch()
         self.assertEqual(fit.call_count, 2)
         x, y = fit.call_args.args
         self.assertEqual(len(x), 8)
-        torch.testing.assert_close(y, torch.full((8, 1), .8, dtype=torch.double))
+        torch.testing.assert_close(y, torch.full((8, 1), -.8, dtype=torch.double))
         self.assertEqual(len(selector.history), 2)
+
+    def test_low_reward_direction_for_ucb_and_logei(self):
+        from types import SimpleNamespace
+        # A controlled posterior: prompt 0 is hardest; uncertainty is equal.
+        class NegativeRewardModel:
+            def posterior(self, x, observation_noise=False):
+                return SimpleNamespace(mean=-x[:, :1],
+                                       variance=torch.full_like(x[:, :1], .01))
+        candidates = torch.tensor([[.1], [.5], [.9]], dtype=torch.double)
+        for method in ['ucb', 'logei']:
+            scores = score_candidates(NegativeRewardModel(), candidates,
+                                      method=method, best_f=-.2)
+            self.assertGreater(scores[0], scores[1])
+            self.assertGreater(scores[1], scores[2])
+            selector = PromptBOSelector(rows(), acquisition=method, warmup_rounds=1)
+            ids = selector.next_batch()
+            rewards = np.repeat(np.linspace(.1, .8, 8)[:, None], 8, axis=1)
+            selector.observe_round(ids, rewards)
+            with patch('pcpo_bo.selector.fit_model', return_value=object()) as fit:
+                with patch('pcpo_bo.selector.score_candidates',
+                           return_value=torch.arange(32, dtype=torch.double)) as score:
+                    selector.next_batch()
+            torch.testing.assert_close(fit.call_args.args[1],
+                                       -torch.tensor(rewards.mean(axis=1)).reshape(-1, 1))
+            self.assertAlmostEqual(score.call_args.kwargs['best_f'], -.1)
+            np.testing.assert_allclose(selector.history[0]['prompt_mean_rewards'],
+                                       rewards.mean(axis=1))
+
+    def test_old_maximize_state_cannot_silently_resume(self):
+        import json
+        selector = PromptBOSelector(rows())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'state.json'
+            selector.save_state(path)
+            state = json.loads(path.read_text())
+            state['version'] = 'pcpo-prompt-bo-v1'
+            path.write_text(json.dumps(state))
+            with self.assertRaisesRegex(ValueError, 'start a new run'):
+                PromptBOSelector.load_state(path, rows())
 
     def test_dataloader_round_and_checkpoint_pairing(self):
         from torch.utils.data import DataLoader
