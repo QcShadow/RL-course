@@ -20,4 +20,10 @@ ids = selector.next_batch()
 selector.observe(ids, image_rewards)
 ```
 
+## 已接好和待接入
+
+已接好：训练池行号包装、1530 维特征契约检查、乱序 64 张图按 Dataset 行号归组、有效优势计算、BO 状态保存和恢复。可直接使用 `bo_signal.integration.observe_flat()`，不需要手写 `reshape`。
+
+需要队友在 PCPO 脚本补一处：在每轮 DataLoader 迭代前把 `next_batch()` 的索引交给 sampler。该位置依赖队友脚本中的 Dataset 和 sampler 变量，包内不能替换。PCPO 的 reward、优势和 loss 不需要改写。
+
 预热 20 轮，之后 GP 用最近 50 轮观测，UCB 最大化有效信号。四组对照应包括 random、低平均 reward、直接按 reward 方差排序和本包的 BO 版本。这个包只验证信号选择，不声称 BO 本身一定优于直接方差排序。

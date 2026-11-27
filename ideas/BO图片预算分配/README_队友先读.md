@@ -8,6 +8,10 @@
 
 `next_batch()` 返回 `prompt_indices` 和 `image_counts`。队友需要让 DataLoader 按每个提示的数量复制行号，并在 reward 收集后按变长列表调用 `observe()`。PCPO 的优势分组要从固定 8 张改成按 `image_counts` 分组；总图片数仍是 64。
 
+已接好：总预算约束、4 到 12 张的数量分配、变长行号展开、乱序 reward 归组、样本标准差标签、BO 状态保存和恢复。可直接使用 `bo_budget.integration.expand_prompt_indices()` 和 `group_flat_rewards()`。
+
+需要队友在 PCPO 脚本补两处：让 sampler/DataLoader 接受变长重复次数；让优势统计和梯度累积按变长分组运行。这两处依赖队友脚本的批次和统计器实现，包内留空。
+
 这不是 v2 的简单替换：v2 只决定选哪 8 条提示；本包还改变每条提示的采样重复次数。它不应与固定 8 张图的实验混用，也不能继续使用只检查每组 8 张图的接口。
 
 ## 目标和对照
