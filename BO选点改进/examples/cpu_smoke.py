@@ -10,6 +10,7 @@ from pcpo_bo import PromptBOSelector
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--acquisition', choices=['ucb', 'logei', 'random'], default='ucb')
+    parser.add_argument('--objective', choices=['min_reward', 'max_group_variance'], default='min_reward')
     parser.add_argument('--pool', type=Path)
     parser.add_argument('--warmup-rounds', type=int, default=1)
     args = parser.parse_args()
@@ -17,7 +18,8 @@ def main():
         rows = [{'prompt': line.strip()} for line in args.pool.read_text().splitlines() if line.strip()]
     else:
         rows = [{'prompt': f'A printed sign reading "word {i}" in a bright room.'} for i in range(64)]
-    selector = PromptBOSelector(rows, acquisition=args.acquisition, warmup_rounds=args.warmup_rounds)
+    selector = PromptBOSelector(rows, acquisition=args.acquisition, objective=args.objective,
+                                warmup_rounds=args.warmup_rounds)
     rng = np.random.default_rng(123)
     start = time.monotonic()
     for epoch in range(args.warmup_rounds + 1):
@@ -32,7 +34,7 @@ def main():
         selector.save_state(path)
         restored = PromptBOSelector.load_state(path, rows)
         assert restored.history == selector.history
-    print(f"CPU smoke passed, pool={len(rows)}, acquisition={args.acquisition}, elapsed={time.monotonic()-start:.2f}s")
+    print(f"CPU smoke passed, pool={len(rows)}, acquisition={args.acquisition}, objective={args.objective}, elapsed={time.monotonic()-start:.2f}s")
 
 
 if __name__ == '__main__':

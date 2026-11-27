@@ -10,17 +10,23 @@ from .acquisition import score_candidates
 from .features import encode_rows
 from .gp import bo_cpu_context, fit_model
 
-STATE_VERSION = "pcpo-prompt-bo-v3-min-reward-no-repeat"
+STATE_VERSION = "pcpo-prompt-bo-v4-objectives-no-repeat"
+OBJECTIVE_NAMES = {
+    "min_reward": "minimize_prompt_mean_ocr_reward",
+    "max_group_variance": "maximize_prompt_ocr_reward_variance",
+}
 
 
 class PromptBOSelector:
-    def __init__(self, candidate_rows, *, seed=42, acquisition="ucb", beta=2.0,
+    def __init__(self, candidate_rows, *, seed=42, acquisition="ucb", objective="min_reward", beta=2.0,
                  warmup_rounds=20, batch_size=8, images_per_prompt=8, window_rounds=50):
         if acquisition not in {"ucb", "logei", "random"}:
             raise ValueError("acquisition must be ucb, logei or random")
+        if objective not in {"min_reward", "max_group_variance"}:
+            raise ValueError("objective must be min_reward or max_group_variance")
         self.candidate_rows = list(candidate_rows)
         self.features = encode_rows(self.candidate_rows).cpu()
-        self.config = dict(seed=seed, acquisition=acquisition, beta=beta,
+        self.config = dict(seed=seed, acquisition=acquisition, objective=objective, beta=beta,
                            warmup_rounds=warmup_rounds, batch_size=batch_size,
                            images_per_prompt=images_per_prompt, window_rounds=window_rounds)
         if len(set(row['prompt'] for row in self.candidate_rows)) < batch_size:
@@ -49,13 +55,18 @@ class PromptBOSelector:
         else:
             recent = self.history[-cfg['window_rounds']:]
             indices = [i for record in recent for i in record['prompt_indices']]
-            values = [y for record in recent for y in record['prompt_mean_rewards']]
-            # BO minimizes raw OCR reward; acquisition functions maximize its negative.
-            train_y = -torch.tensor(values, dtype=torch.double).reshape(-1, 1)
+            target = 'prompt_mean_rewards' if cfg['objective'] == 'min_reward' else 'prompt_reward_variances'
+            values = [y for record in recent for y in record[target]]
+            best_f = min(values) if cfg['objective'] == 'min_reward' else max(values)
+            train_y = torch.tensor(values, dtype=torch.double).reshape(-1, 1)
+            if cfg['objective'] == 'min_reward':
+                # Acquisition functions maximize, so fit the negative raw reward.
+                train_y = -train_y
+                best_f = -best_f
             with bo_cpu_context(seed):
                 model = fit_model(self.features[indices], train_y)
                 scores = score_candidates(model, self.features, method=cfg['acquisition'],
-                                          beta=cfg['beta'], best_f=-min(values))
+                                          beta=cfg['beta'], best_f=best_f)
             order = torch.argsort(scores, descending=True, stable=True).tolist()
             mode = cfg['acquisition']
         # Use all history, not the GP window, so old prompts stay excluded after resume.
@@ -74,7 +85,10 @@ class PromptBOSelector:
             raise ValueError("Not enough untrained distinct prompts for a full batch")
         self.pending = {
             'epoch': self.completed_rounds, 'selection_method': mode,
-            'selection_objective': 'minimize_prompt_mean_ocr_reward',
+            'selection_objective': (
+                'random_without_replacement' if cfg['acquisition'] == 'random'
+                else OBJECTIVE_NAMES[cfg['objective']]
+            ),
             'prompt_indices': selected,
             'acquisition_scores': None if scores is None else scores[selected].tolist(),
         }
@@ -98,6 +112,7 @@ class PromptBOSelector:
             **self.pending, 'policy_step': policy_step,
             'image_rewards': rewards.tolist(),
             'prompt_mean_rewards': rewards.mean(axis=1).tolist(),
+            'prompt_reward_variances': rewards.var(axis=1).tolist(),
             'round_mean_reward': float(rewards.mean()),
         }
         self.history.append(record)
@@ -134,7 +149,7 @@ class PromptBOSelector:
     def load_state(cls, path, candidate_rows):
         state = json.loads(Path(path).read_text())
         if state['version'] != STATE_VERSION:
-            raise ValueError("BO state version differs: start a new run for the minimize-reward, no-repeat policy")
+            raise ValueError("BO state version differs: start a new run for the selected no-repeat BO objective")
         selector = cls(candidate_rows, **state['config'])
         if selector.pool_sha256 != state['pool_sha256']:
             raise ValueError("Prompt text or pool order differs from saved state")

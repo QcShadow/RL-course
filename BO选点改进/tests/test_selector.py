@@ -167,6 +167,36 @@ class SelectorTests(unittest.TestCase):
             np.testing.assert_allclose(selector.history[0]['prompt_mean_rewards'],
                                        rewards.mean(axis=1))
 
+    def test_v2_maximizes_within_prompt_reward_variance(self):
+        from types import SimpleNamespace
+        class HigherVarianceModel:
+            def posterior(self, x, observation_noise=False):
+                return SimpleNamespace(mean=x[:, :1],
+                                       variance=torch.full_like(x[:, :1], .01))
+        candidates = torch.tensor([[.1], [.5], [.9]], dtype=torch.double)
+        for method in ['ucb', 'logei']:
+            scores = score_candidates(HigherVarianceModel(), candidates,
+                                      method=method, best_f=.2)
+            self.assertLess(scores[0], scores[1])
+            self.assertLess(scores[1], scores[2])
+        selector = PromptBOSelector(rows(), acquisition='ucb',
+                                    objective='max_group_variance', warmup_rounds=1)
+        ids = selector.next_batch()
+        rewards = np.tile(np.array([0., 0., 0., 0., 0., 0., 0., .8]), (8, 1))
+        selector.observe_round(ids, rewards)
+        expected_variances = rewards.var(axis=1)
+        with patch('pcpo_bo.selector.fit_model', return_value=object()) as fit:
+            with patch('pcpo_bo.selector.score_candidates',
+                       return_value=torch.arange(32, dtype=torch.double)) as score:
+                selector.next_batch()
+        torch.testing.assert_close(fit.call_args.args[1],
+                                   torch.tensor(expected_variances).reshape(-1, 1))
+        self.assertAlmostEqual(score.call_args.kwargs['best_f'], expected_variances[0])
+        record = selector.history[0]
+        np.testing.assert_allclose(record['prompt_reward_variances'], expected_variances)
+        np.testing.assert_allclose(record['prompt_mean_rewards'], rewards.mean(axis=1))
+        self.assertEqual(record['selection_objective'], 'maximize_prompt_ocr_reward_variance')
+
     def test_old_maximize_state_cannot_silently_resume(self):
         import json
         selector = PromptBOSelector(rows())
@@ -178,6 +208,14 @@ class SelectorTests(unittest.TestCase):
             path.write_text(json.dumps(state))
             with self.assertRaisesRegex(ValueError, 'start a new run'):
                 PromptBOSelector.load_state(path, rows())
+
+    def test_v1_and_v2_checkpoint_settings_cannot_be_mixed(self):
+        from pcpo_bo.pcpo_adapter import load_for_epoch
+        selector = PromptBOSelector(rows(), objective='max_group_variance')
+        with tempfile.TemporaryDirectory() as tmp:
+            selector.save_state(Path(tmp) / 'epoch-000000.json')
+            with self.assertRaisesRegex(ValueError, 'epoch/settings'):
+                load_for_epoch(rows(), tmp, 0, **{**selector.config, 'objective': 'min_reward'})
 
     def test_dataloader_round_and_checkpoint_pairing(self):
         from torch.utils.data import DataLoader

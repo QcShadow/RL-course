@@ -584,6 +584,7 @@ def main(_):
 
     bo_options = dict(
         seed=42, acquisition=os.environ.get("PCPO_BO_ACQUISITION", "ucb"),
+        objective=os.environ.get("PCPO_BO_OBJECTIVE", "min_reward"),
         beta=2.0, warmup_rounds=20, batch_size=8, images_per_prompt=8, window_rounds=50,
     )
     if config.sample.num_prompt_per_epoch != 8 or config.sample.num_image_per_prompt != 8:
